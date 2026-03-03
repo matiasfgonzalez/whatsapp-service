@@ -4,7 +4,13 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import whatsappRoutes from './routes/whatsappRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import apiKeyRoutes from './routes/apiKeyRoutes.js';
 import whatsappManager from './whatsapp/whatsappManager.js';
+import prisma from './lib/prisma.js';
+import authClerk from './middleware/authClerk.js';
+import authApiKey from './middleware/authApiKey.js';
+import authApiKeyOrClerk from './middleware/authApiKeyOrClerk.js';
 
 dotenv.config();
 
@@ -21,7 +27,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(
   cors({
     origin: allowedOrigins.includes('*') ? true : allowedOrigins,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
   }),
 );
 
@@ -29,7 +36,7 @@ app.use(
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // máximo 100 requests por IP
+    max: process.env.NODE_ENV === 'production' ? 100 : 1000, // 1000 en dev, 100 en prod
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Demasiadas solicitudes, intenta más tarde' },
@@ -46,10 +53,16 @@ app.get('/health', (_req, res) => {
 });
 
 // ─── Rutas ───────────────────────────────────────────────
-app.use('/api/v1/whatsapp', whatsappRoutes);
 
-// Mantener ruta legacy por compatibilidad (opcional, quitar cuando migres)
-app.use('/whatsapp', whatsappRoutes);
+// Rutas protegidas por Clerk (usuario logueado desde el frontend)
+app.use('/api/v1/users', authClerk, userRoutes);
+app.use('/api/v1/api-keys', authClerk, apiKeyRoutes);
+
+// Rutas protegidas por API Key O Clerk JWT (dashboard + integraciones externas)
+app.use('/api/v1/whatsapp', authApiKeyOrClerk, whatsappRoutes);
+
+// Mantener ruta legacy por compatibilidad (solo API Key)
+app.use('/whatsapp', authApiKey, whatsappRoutes);
 
 // ─── 404 ─────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -79,6 +92,7 @@ const server = app.listen(PORT, () => {
 const shutdown = async (signal) => {
   console.log(`\n🛑 ${signal} recibido. Cerrando sesiones...`);
   await whatsappManager.destroyAll();
+  await prisma.$disconnect();
   server.close(() => {
     console.log('👋 Servidor cerrado correctamente');
     process.exit(0);

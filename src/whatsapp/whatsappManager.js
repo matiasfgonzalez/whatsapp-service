@@ -136,18 +136,29 @@ class WhatsAppManager {
 
     if (!client) return 'not_found';
 
+    let state = null;
     try {
-      const state = await client.getState();
-      // Estados posibles: CONNECTED, OPENING, PAIRING, TIMEOUT, CONFLICT, etc.
-      if (state === 'CONNECTED') return 'connected';
-      if (state === 'OPENING') return 'connecting';
-      if (state === 'PAIRING') return 'waiting_qr';
-      return state?.toLowerCase() || 'disconnected';
+      state = await client.getState();
     } catch {
-      // Si getState() falla, el cliente no está activo
-      if (this.qrCodes.has(businessId)) return 'waiting_qr';
-      return 'disconnected';
+      // Ignorar errores temporales al obtener estado (ej: browser loading)
     }
+
+    if (state === 'CONNECTED') return 'connected';
+    if (state === 'OPENING') return 'connecting';
+
+    // Si tenemos un QR en memoria, siempre primará el estado waiting_qr
+    if (this.qrCodes.has(businessId)) {
+      return 'waiting_qr';
+    }
+
+    if (state === 'PAIRING') return 'waiting_qr';
+
+    // Si no hay info aún y no hay QR, seguimos inicializando
+    if (client.info === undefined && !state) {
+      return 'initializing';
+    }
+
+    return state?.toLowerCase() || 'disconnected';
   }
 
   /**
@@ -195,11 +206,80 @@ class WhatsAppManager {
   }
 
   /**
+   * Envía un mensaje usando cualquier sesión conectada disponible.
+   * Útil cuando no interesa qué businessId envía el mensaje.
+   * @param {string} to - Número de teléfono (con código de país, sin +)
+   * @param {string} message - Texto del mensaje
+   * @deprecated Usar sendMessageForUser() para respetar la propiedad de sesiones.
+   */
+  async sendMessageAny(to, message) {
+    return this.sendMessageForUser(to, message, null);
+  }
+
+  /**
+   * Envía un mensaje usando cualquier sesión conectada que pertenezca al usuario.
+   * Solo considera las sesiones cuyos businessIds están en allowedBusinessIds.
+   * @param {string} to - Número de teléfono (con código de país, sin +)
+   * @param {string} message - Texto del mensaje
+   * @param {string[]|null} allowedBusinessIds - Lista de businessIds permitidos (null = todos)
+   */
+  async sendMessageForUser(to, message, allowedBusinessIds) {
+    if (this.clients.size === 0) {
+      throw new Error(
+        'No hay sesiones registradas. Inicia al menos una sesión primero.',
+      );
+    }
+
+    // Buscar la primera sesión en estado CONNECTED dentro de las permitidas
+    for (const [businessId, client] of this.clients) {
+      // Si hay filtro, solo considerar las sesiones permitidas
+      if (allowedBusinessIds && !allowedBusinessIds.includes(businessId)) {
+        continue;
+      }
+
+      try {
+        const state = await client.getState();
+        if (state === 'CONNECTED') {
+          console.log(
+            `📤 Enviando mensaje a través de la sesión: ${businessId}`,
+          );
+          return await this.sendMessage(businessId, to, message);
+        }
+      } catch {
+        // Este cliente no está disponible, continuar con el siguiente
+      }
+    }
+
+    throw new Error(
+      'No hay sesiones conectadas disponibles. Asegúrate de que al menos una de tus sesiones haya escaneado el QR.',
+    );
+  }
+
+  /**
    * Lista todos los negocios con sesión activa.
    */
   async listSessions() {
     const sessions = [];
     for (const [businessId] of this.clients) {
+      const status = await this.getSessionStatus(businessId);
+      sessions.push({
+        businessId,
+        status,
+        hasQR: this.qrCodes.has(businessId),
+      });
+    }
+    return sessions;
+  }
+
+  /**
+   * Lista solo las sesiones cuyos businessIds pertenecen al usuario.
+   * @param {string[]} allowedBusinessIds - Lista de businessIds del usuario
+   */
+  async listSessionsForUser(allowedBusinessIds) {
+    const sessions = [];
+    for (const [businessId] of this.clients) {
+      if (!allowedBusinessIds.includes(businessId)) continue;
+
       const status = await this.getSessionStatus(businessId);
       sessions.push({
         businessId,

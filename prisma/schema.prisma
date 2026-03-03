@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Modelo de Usuario ───────────────────────────────────
+model User {
+  id        String   @id @default(uuid())
+  clerkId   String   @unique @map("clerk_id")
+  name      String
+  email     String   @unique
+  imageUrl  String?  @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  active    Boolean  @default(true)
+
+  apiKey     ApiKey?
+  businesses Business[]
+  auditLogs  AuditLog[]
+
+  @@map("users")
+}
+
+// ─── Modelo de Negocio / Sesión WhatsApp ─────────────────
+model Business {
+  id         String   @id @default(uuid())
+  businessId String   @unique @map("business_id") // ID humano usado en las rutas (e.g. "mi-negocio")
+  userId     String   @map("user_id")
+  name       String?  // Nombre descriptivo opcional
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  active     Boolean  @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("businesses")
+}
+
+// ─── Modelo de API Key ───────────────────────────────────
+model ApiKey {
+  id           String    @id @default(uuid())
+  keyHash      String    @unique @map("key_hash")      // SHA-256 hash para auth
+  keyHint      String    @map("key_hint")              // Últimos 8 chars para display (e.g. "...a1b2c3d4")
+  keyEncrypted String?   @map("key_encrypted")         // AES-256-GCM encrypted key (recoverable for user display)
+  userId       String    @unique @map("user_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  active       Boolean   @default(true)
+  lastUsed     DateTime? @map("last_used")
+  expiresAt    DateTime? @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// ─── Audit Log — Registro de actividad ───────────────────
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String   // e.g. "api_key.created", "session.init", "message.sent"
+  resource  String?  // e.g. businessId, apiKeyId
+  ip        String?
+  userAgent String?  @map("user_agent")
+  metadata  Json?    // datos adicionales flexibles
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
