@@ -162,6 +162,50 @@ class WhatsAppManager {
   }
 
   /**
+   * Devuelve información del número de WhatsApp conectado (nombre, teléfono, plataforma, foto).
+   * Solo funciona cuando el estado es CONNECTED.
+   * @param {string} businessId
+   */
+  async getProfileInfo(businessId) {
+    const client = this.clients.get(businessId);
+
+    if (!client) {
+      return null;
+    }
+
+    try {
+      const state = await client.getState();
+      if (state !== 'CONNECTED') return null;
+    } catch {
+      return null;
+    }
+
+    const info = client.info;
+    if (!info) return null;
+
+    const phone = info.wid?.user || null;
+    const name = info.pushname || null;
+    const platform = info.platform || null;
+
+    // Intentar obtener foto de perfil (puede fallar)
+    let profilePicUrl = null;
+    try {
+      if (info.wid?._serialized) {
+        profilePicUrl = await Promise.race([
+          client.getProfilePicUrl(info.wid._serialized),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 3000),
+          ),
+        ]);
+      }
+    } catch {
+      // Sin foto de perfil — continuar
+    }
+
+    return { phone, name, platform, profilePicUrl };
+  }
+
+  /**
    * Envía un mensaje de texto a un número.
    * @param {string} businessId - ID del negocio
    * @param {string} to - Número de teléfono (con código de país, sin +)

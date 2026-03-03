@@ -274,6 +274,36 @@ router.get('/status/:businessId', async (req, res) => {
 });
 
 /**
+ * GET /profile/:businessId — Info del número de WhatsApp conectado
+ * Devuelve nombre (pushname), teléfono, plataforma y foto de perfil.
+ * Solo disponible cuando la sesión está en estado CONNECTED.
+ */
+router.get('/profile/:businessId', async (req, res) => {
+  const { businessId } = req.params;
+
+  if (!validateBusinessId(businessId)) {
+    return res.status(400).json({ error: 'businessId inválido' });
+  }
+
+  const ownership = await requireOwnership(businessId, req.user.id, res);
+  if (!ownership) return;
+
+  try {
+    const profile = await whatsappManager.getProfileInfo(businessId);
+
+    if (!profile) {
+      return res.status(404).json({
+        error: 'Perfil no disponible. La sesión no está conectada.',
+      });
+    }
+
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /sessions — Listar sesiones activas DEL USUARIO
  * Solo retorna las sesiones que pertenecen al usuario autenticado.
  */
