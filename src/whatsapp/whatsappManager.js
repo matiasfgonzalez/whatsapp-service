@@ -162,6 +162,89 @@ class WhatsAppManager {
   }
 
   /**
+   * Obtiene la lista de contactos de WhatsApp.
+   * Solo funciona cuando el estado es CONNECTED.
+   * @param {string} businessId
+   * @param {string} [search] - Filtro por nombre o número
+   * @param {number} [limit=50] - Máximo de resultados
+   */
+  async getContacts(businessId, search = '', limit = 50) {
+    const client = this.clients.get(businessId);
+    if (!client) return null;
+
+    try {
+      const state = await client.getState();
+      if (state !== 'CONNECTED') return null;
+    } catch {
+      return null;
+    }
+
+    const allContacts = await client.getContacts();
+
+    // Filtrar: solo contactos reales @c.us (excluir @lid, groups, broadcast)
+    let contacts = allContacts.filter(
+      (c) =>
+        !c.isGroup &&
+        c.id.server === 'c.us' &&
+        c.id.user &&
+        /^\d{7,15}$/.test(c.id.user),
+    );
+
+    // Deduplicar por número (seguridad extra por si hay varios @c.us con mismo número)
+    const seen = new Map();
+    for (const c of contacts) {
+      const key = c.id.user;
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, c);
+      } else {
+        const score = (x) =>
+          (x.name ? 4 : 0) + (x.pushname ? 2 : 0) + (x.isMyContact ? 1 : 0);
+        if (score(c) > score(existing)) {
+          seen.set(key, c);
+        }
+      }
+    }
+    contacts = [...seen.values()];
+
+    // Aplicar búsqueda
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      contacts = contacts.filter(
+        (c) =>
+          c.name?.toLowerCase().includes(q) ||
+          c.pushname?.toLowerCase().includes(q) ||
+          c.id.user.includes(q),
+      );
+    }
+
+    // Ordenar: primero los de agenda, luego alfabéticamente
+    contacts.sort((a, b) => {
+      if (a.isMyContact && !b.isMyContact) return -1;
+      if (!a.isMyContact && b.isMyContact) return 1;
+      const nameA = (a.name || a.pushname || a.id.user).toLowerCase();
+      const nameB = (b.name || b.pushname || b.id.user).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    // limit=0 significa traer todos
+    const sliced = limit > 0 ? contacts.slice(0, limit) : contacts;
+
+    return {
+      total: contacts.length,
+      count: sliced.length,
+      contacts: sliced.map((c) => ({
+        id: c.id.user,
+        name: c.name || null,
+        pushname: c.pushname || null,
+        displayName: c.name || c.pushname || `+${c.id.user}`,
+        isBusiness: c.isBusiness ?? false,
+        isMyContact: c.isMyContact ?? false,
+      })),
+    };
+  }
+
+  /**
    * Devuelve información del número de WhatsApp conectado (nombre, teléfono, plataforma, foto).
    * Solo funciona cuando el estado es CONNECTED.
    * @param {string} businessId

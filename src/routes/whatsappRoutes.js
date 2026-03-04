@@ -304,6 +304,47 @@ router.get('/profile/:businessId', async (req, res) => {
 });
 
 /**
+ * GET /contacts/:businessId — Lista de contactos de WhatsApp
+ * Query params:
+ *   search  — filtro por nombre o número (opcional)
+ *   limit   — máximo de resultados, default 50, max 200
+ *
+ * Solo funciona cuando la sesión está en estado CONNECTED.
+ * Advertencia: getContacts() puede tardar varios segundos en cuentas con muchos contactos.
+ */
+router.get('/contacts/:businessId', async (req, res) => {
+  const { businessId } = req.params;
+
+  if (!validateBusinessId(businessId)) {
+    return res.status(400).json({ error: 'businessId inválido' });
+  }
+
+  const ownership = await requireOwnership(businessId, req.user.id, res);
+  if (!ownership) return;
+
+  const search = typeof req.query.search === 'string' ? req.query.search : '';
+  const rawLimit = parseInt(req.query.limit, 10);
+  // limit=0 → traer todos; por defecto 50, máximo 10000
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 0), 10000)
+    : 50;
+
+  try {
+    const result = await whatsappManager.getContacts(businessId, search, limit);
+
+    if (!result) {
+      return res.status(404).json({
+        error: 'Contactos no disponibles. La sesión no está conectada.',
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /sessions — Listar sesiones activas DEL USUARIO
  * Solo retorna las sesiones que pertenecen al usuario autenticado.
  */
