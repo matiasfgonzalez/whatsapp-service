@@ -1,0 +1,12 @@
+node_modules
+.wwebjs_cache
+sessions
+npm-debug.log
+.env
+.env.local
+.env.production
+Dockerfile
+.dockerignore
+.git
+.vscode
+README.md
