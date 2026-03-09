@@ -36,7 +36,7 @@ app.use(
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: process.env.NODE_ENV === 'production' ? 100 : 1000, // 1000 en dev, 100 en prod
+    max: process.env.NODE_ENV === 'production' ? 1000 : 10000, // 1000 en dev, 100 en prod
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Demasiadas solicitudes, intenta más tarde' },
