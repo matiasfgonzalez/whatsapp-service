@@ -42,7 +42,28 @@ export async function verifyOwnership(businessId, userId) {
  * @returns {Object} El registro del business creado o existente
  */
 export async function claimBusiness(businessId, userId, name = null) {
-  // Intento 1: crear directamente (atómico gracias al unique constraint)
+  // 1. Intentamos buscarlo primero para evitar que Prisma loguee "P2002 Error" en consola inútilmente
+  const existing = await prisma.business.findUnique({
+    where: { businessId },
+  });
+
+  // 2. Si ya existe, validamos permisos y devolvemos
+  if (existing) {
+    if (existing.userId !== userId) {
+      throw new Error('BUSINESS_TAKEN');
+    }
+
+    // Si estaba inactivo, lo reactivamos
+    if (!existing.active) {
+      return prisma.business.update({
+        where: { businessId },
+        data: { active: true, name: name || existing.name },
+      });
+    }
+    return existing;
+  }
+
+  // 3. Si no existe, intentamos crearlo
   try {
     return await prisma.business.create({
       data: { businessId, userId, name },
@@ -52,36 +73,16 @@ export async function claimBusiness(businessId, userId, name = null) {
     if (err.code !== 'P2002') {
       throw err;
     }
-    // El businessId ya existe → caemos al flujo de verificación
-  }
 
-  // Si llegamos aquí, el businessId ya existe en la DB.
-  // Leer el registro existente y verificar propiedad.
-  const existing = await prisma.business.findUnique({
-    where: { businessId },
-  });
-
-  if (!existing) {
-    // Caso extremo: fue eliminado entre el create y el findUnique
-    // Re-intentar creación una vez
-    return prisma.business.create({
-      data: { businessId, userId, name },
-    });
-  }
-
-  if (existing.userId !== userId) {
-    throw new Error('BUSINESS_TAKEN');
-  }
-
-  // Si estaba inactivo, reactivar
-  if (!existing.active) {
-    return prisma.business.update({
+    // Race condition: alguien más lo acaba de crear milisegundos atrás
+    const doubleCheck = await prisma.business.findUnique({
       where: { businessId },
-      data: { active: true, name: name || existing.name },
     });
+    if (doubleCheck && doubleCheck.userId !== userId) {
+      throw new Error('BUSINESS_TAKEN');
+    }
+    return doubleCheck;
   }
-
-  return existing;
 }
 
 /**
